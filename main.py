@@ -300,7 +300,7 @@ def DeleteUser():
     try:
         ID = int(selected_people[0])
         # Удаляем ученика после дополнительного вопроса
-        dialog = customtkinter.CTkInputDialog(text=f'Для удалнения ученика напишите его имя: "{selected_people[1]}".',
+        dialog = customtkinter.CTkInputDialog(text=f'Для удаления ученика напишите его имя: "{selected_people[1]}".',
                                               title="Удаление ученика")
         name = dialog.get_input()
         if name == selected_people[1]:
