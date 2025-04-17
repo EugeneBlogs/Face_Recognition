@@ -1,12 +1,11 @@
 # region Библиотеки
-import datetime
-import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, simpledialog, scrolledtext
-
 import cv2
+import os
 import numpy as np
 from PIL import Image
+import datetime
 
 
 # endregion
@@ -58,6 +57,14 @@ class App(tk.Tk):
 
         self.create_widgets()
 
+        # Инициализация данных
+        self.path = os.path.dirname(os.path.abspath(__file__))
+        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+        self.faceCascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
+        self.users = []
+
+        self.UpdateUsers()
+
     def create_widgets(self):
         # Основной фрейм
         main_frame = ttk.Frame(self)
@@ -87,13 +94,12 @@ class App(tk.Tk):
 
         # Кнопки
         buttons = [
-            ("Добавить ученика (камера)", self.add_user),
-            ("Добавить ученика (видео)", self.add_video),
-            ("Запустить распознавание", self.start_recognition),
-            ("Удалить ученика", self.delete_user),
-            ("Обучить модель", self.training_model),
-            ("История прохождений", self.show_history),
-            ("Обновить список", self.update_users)
+            ("Добавить ученика (камера)", self.AddUser),
+            ("Добавить ученика (видео)", self.AddVideo),
+            ("Запустить распознавание", self.StartRecognition),
+            ("Удалить ученика", self.DeleteUser),
+            ("Обучить модель", self.TrainingModel),
+            ("История прохождений", self.ShowHistory)
         ]
 
         for i, (text, command) in enumerate(buttons):
@@ -104,268 +110,267 @@ class App(tk.Tk):
         main_frame.rowconfigure(1, weight=1)
         main_frame.columnconfigure(0, weight=1)
 
-        # Инициализация данных
-        self.path = os.path.dirname(os.path.abspath(__file__))
-        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
-        self.faceCascade = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
-        self.users = []
-
-        self.update_users()
-
     # endregion
 
-    # region Работа с учениками
-    def update_users(self):
+    # region Работа с учениками (таблицой)
+    def UpdateUsers(self):
         # Чистим данные и таблицу
         self.users = []
         for i in self.tree.get_children():
             self.tree.delete(i)
-
+        file = open("names.txt", "r+", encoding='utf-8')  # Открываем файл с именами
+        text = file.read()  # Считываем информацию с файла
+        info = text.split("\n")  # Делим текст построчно
         try:
-            with open("names.txt", "r+", encoding='utf-8') as file:
-                for line in file:
-                    line = line.strip()
-                    if line:
-                        i = line.split(",")
-                        if len(i) >= 3:
-                            user = [i[0], i[1], i[2]]
-                            self.users.append(user)
-                            self.tree.insert("", tk.END, values=user)
-        except FileNotFoundError:
-            messagebox.showwarning("Предупреждение", "Файл с данными учеников не найден.")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка при чтении файла: {str(e)}")
+            for s in info:  # Проходим по всем строкам
+                i = s.split(",")  # Создаём массив ID-Имя
+                user = [i[0], i[1], i[2]]  # Создаём человека
+                self.users.append(user)  # Добавляем его в общий массив
+            for person in self.users:  # Добавляем людей в таблицу
+                self.tree.insert("", tk.END, values=person)
+        except:
+            print("Нет зарегистрировавшихся учеников.")
 
     def get_images_and_labels(self, datapath):
-        image_paths = [os.path.join(datapath, f) for f in os.listdir(datapath)]
+        image_paths = [os.path.join(datapath, f) for f in os.listdir(datapath)]  # Получаем путь к фото
+        # Списки фото и подписей
         images = []
         labels = []
-
+        # Перебираем все фото в dataSet
         for image_path in image_paths:
-            try:
-                image_pil = Image.open(image_path).convert('L')
-                image = np.array(image_pil, 'uint8')
-                nbr = int(os.path.split(image_path)[1].split(".")[0].replace("face-", ""))
-                faces = self.faceCascade.detectMultiScale(image)
+            image_pil = Image.open(image_path).convert('L')  # Читаем фото и переводим в ч/б
+            image = np.array(image_pil, 'uint8')  # Переводим фото в numpy-массив
+            nbr = int(
+                os.path.split(image_path)[1].split(".")[0].replace("face-", ""))  # Получаем ID ученика из имени файла
+            faces = self.faceCascade.detectMultiScale(image)  # Определяем лицо на фото
+            for (x, y, w, h) in faces:  # Если лицо найдено, то
+                images.append(image[y: y + h, x: x + w])  # Добавляем его к списку фото
+                labels.append(nbr)  # Добавляем ID ученика в список подписей
+                cv2.imshow("Photo Analysis", image[y: y + h, x: x + w])  # Выводим текущее фото на экран
+                cv2.waitKey(100)  # Делаем паузу
+        return images, labels  # Возвращаем список фото и подписей
 
-                for (x, y, w, h) in faces:
-                    images.append(image[y: y + h, x: x + w])
-                    labels.append(nbr)
-                    cv2.imshow("Photo Analysis", image[y: y + h, x: x + w])
-                    cv2.waitKey(100)
-            except Exception as e:
-                print(f"Ошибка обработки изображения {image_path}: {str(e)}")
-
-        return images, labels
-
-    def training_model(self):
+    def TrainingModel(self):
         if len(self.tree.get_children()) != 0:
+            images, labels = self.get_images_and_labels("dataSet")  # Получаем список фото и подписей
+            self.recognizer.train(images, np.array(labels))  # Обучаем модель распознавания
+            self.recognizer.save("trainer.yml")  # Сохраняем модель
+            cv2.destroyAllWindows()  # Удаляем из памяти все созданные окна
+            messagebox.showinfo("Успешно", "Нейросеть закончила обучение.")
+
+    def AddUser(self):
+        messagebox.showinfo("Внимание!",
+                            'Процедура сканирования займёт некоторое время.\nВ это время вам необходимо смотреть в камеру, не закрывать лицо и вращать головой.\nНажмите "ОК", и через несколько секунд появится изображение с камеры.\nКак только оно появилось - начинайте движения головой.')  # Информация для пользователя
+
+        name = simpledialog.askstring("Регистрация ученика", "Имя ученика:")  # Запрашиваем имя человека
+        if not name:  # Проверяем, чтобы поле не было пустым
+            return
+
+        klass = simpledialog.askstring("Регистрация ученика",
+                                       "Класс ученика (число+буква):")  # Запрашиваем класс ученика
+        if not klass:  # Проверяем, чтобы поле не было пустым
+            return
+
+        path = os.path.dirname(os.path.abspath(__file__))  # Получаем путь к скрипту
+        detector = cv2.CascadeClassifier(
+            "haarcascade_frontalface_default.xml")  # Указываем, что будем искать лица по примитивам Хаара
+        i = 0  # Счётчик изображений
+        offset = 50  # Расстояния от распознанного лица до рамки
+
+        file = open("names.txt", "r", encoding='utf-8')  # Открываем файл с именами для чтения
+        text = file.read()  # Считываем информацию с файла
+        file.close()  # Закрываем файл
+        info = text.split("\n")  # Делим текст построчно
+        if info[-1] != "":  # Если последняя строка не пустая (то есть люди есть), то
+            last_str = info[-1].split(",")  # Делим последнюю строку по запятой
+        else:  # Иначе
+            last_str = [0, "-"]  # Имитируем последнюю строку с ID = 0
+        ID = int(last_str[0]) + 1  # Новый ID - это старый ID + 1
+        new = f"{ID},{name},{klass}"  # Новые данные
+        text = f"{text}\n{new}"
+        output = '\n'.join(line for line in text.split('\n') if line)  # Удаляем лишние пробелы
+        file = open("names.txt", "w", encoding='utf-8')  # Открываем файл с именами для записи
+        file.write(output)  # Добавляем новую информацию в файл
+        file.close()  # Закрываем файл
+
+        video = cv2.VideoCapture(0)  # Получаем доступ к камере
+
+        # Запускаем цикл
+        while True:
+            ret, im = video.read()  # Получаем видеопоток
+            gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)  # Переводим всё в ч/б для простоты
+            faces = detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(
+                100, 100))  # Настраиваем параметры распознавания и получаем лицо с камеры
+            # Обрабатываем лица
+            for (x, y, w, h) in faces:
+                try:
+                    cv2.imwrite(f"dataSet/face-{ID}.{str(i)}.jpg",
+                                gray[y - offset:y + h + offset, x - offset:x + w + offset])  # Записываем файл на диск
+                    cv2.rectangle(im, (x - 50, y - 50), (x + w + 50, y + h + 50), (225, 0, 0),
+                                  2)  # Формируем размеры окна для вывода лица
+                    cv2.imshow('Creating Photo', im[y - offset:y + h + offset,
+                                                 x - offset:x + w + offset])  # Показываем очередной кадр, который мы запомнили
+                    i += 1  # Увеличиваем счётчик кадров
+                    print(f"{i}/70")
+                except:
+                    print(f"{i}/70")
+                cv2.waitKey(100)  # Делаем паузу
+            if i >= 70:  # Если у нас хватает кадров, то
+                video.release()  # Освобождаем камеру
+                cv2.destroyAllWindows()  # Удалаяем все созданные окна
+                break  # Останавливаем цикл
+
+        self.UpdateUsers()  # Обновляем таблицу
+        messagebox.showinfo("Успешно", f"Поздравляем, {name}!\nВы успешно зарегистрировались в системе.")
+
+    def AddVideo(self):
+        name = simpledialog.askstring("Регистрация ученика", "Имя ученика:")  # Запрашиваем имя человека
+        if not name:  # Проверяем, чтобы поле не было пустым
+            return
+
+        klass = simpledialog.askstring("Регистрация ученика",
+                                       "Класс ученика (число+буква):")  # Запрашиваем класс ученика
+        if not klass:  # Проверяем, чтобы поле не было пустым
+            return
+
+        filename = filedialog.askopenfilename()
+        words = filename.split('/')
+        last_word = words[-1].split('.')
+        format = last_word[-1].upper()
+        formats = ["MP4", "MOV", "AVI", "MKV"]
+        if format not in formats:
+            txt_formats = ""
+            for item in formats:
+                txt_formats += f"{item}, "
+            txt_formats = txt_formats[:-2]
+            messagebox.showerror("Ошибка!",
+                                 f"Неподдерживаемый формат видео.\nВыберите файл формата: {txt_formats}.")
+            return
+
+        path = os.path.dirname(os.path.abspath(__file__))  # Получаем путь к скрипту
+        detector = cv2.CascadeClassifier(
+            "haarcascade_frontalface_default.xml")  # Указываем, что будем искать лица по примитивам Хаара
+        i = 0  # Счётчик изображений
+        offset = 50  # Расстояния от распознанного лица до рамки
+
+        file = open("names.txt", "r", encoding='utf-8')  # Открываем файл с именами для чтения
+        text = file.read()  # Считываем информацию с файла
+        file.close()  # Закрываем файл
+        info = text.split("\n")  # Делим текст построчно
+        if info[-1] != "":  # Если последняя строка не пустая (то есть люди есть), то
+            last_str = info[-1].split(",")  # Делим последнюю строку по запятой
+        else:  # Иначе
+            last_str = [0, "-"]  # Имитируем последнюю строку с ID = 0
+        ID = int(last_str[0]) + 1  # Новый ID - это старый ID + 1
+        new = f"{ID},{name},{klass}"  # Новые данные
+        text = f"{text}\n{new}"
+        output = '\n'.join(line for line in text.split('\n') if line)  # Удаляем лишние пробелы
+        file = open("names.txt", "w", encoding='utf-8')  # Открываем файл с именами для записи
+        file.write(output)  # Добавляем новую информацию в файл
+        file.close()  # Закрываем файл
+
+        video = cv2.VideoCapture(filename)  # Получаем доступ к видео
+        count_fps = 0
+
+        # Запускаем цикл
+        while True:
+            ret, im = video.read()  # Получаем видеопоток
+            count_fps += 1
+            if count_fps == 11:
+                count_fps = 1
             try:
-                images, labels = self.get_images_and_labels("dataSet")
-                self.recognizer.train(images, np.array(labels))
-                self.recognizer.save("trainer.yml")
-                cv2.destroyAllWindows()
-                messagebox.showinfo("Успешно", "Нейросеть закончила обучение.")
-            except Exception as e:
-                messagebox.showerror("Ошибка", f"Произошла ошибка при обучении модели: {str(e)}")
-        else:
-            messagebox.showwarning("Предупреждение", "Нет данных для обучения.")
-
-    def add_user(self):
-        if not messagebox.askyesno("Подтверждение",
-                                   "Процедура сканирования займёт некоторое время.\n"
-                                   "В это время вам необходимо смотреть в камеру, не закрывать лицо и вращать головой.\n"
-                                   "Продолжить?"):
-            return
-
-        name = simpledialog.askstring("Регистрация ученика", "Имя ученика:")
-        if not name:
-            return
-
-        klass = simpledialog.askstring("Регистрация ученика", "Класс ученика (число+буква):")
-        if not klass:
-            return
-
-        try:
-            with open("names.txt", "r+", encoding='utf-8') as file:
-                lines = file.readlines()
-                last_line = lines[-1].strip()
-                if last_line:
-                    last_id = int(last_line.split(",")[0])
-                else:
-                    last_id = 0
-                new_id = last_id + 1
-                file.write(f"\n{new_id},{name},{klass}")
-
-            detector = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
-            offset = 50
-            video = cv2.VideoCapture(0)
-
-            for i in range(70):
-                ret, im = video.read()
-                if not ret:
-                    continue
-
-                gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-                faces = detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
-
+                gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)  # Переводим всё в ч/б для простоты
+                faces = detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(
+                    100, 100))  # Настраиваем параметры распознавания и получаем лицо с камеры
+                # Обрабатываем лица
                 for (x, y, w, h) in faces:
                     try:
-                        cv2.imwrite(f"dataSet/face-{new_id}.{i}.jpg",
-                                    gray[y - offset:y + h + offset, x - offset:x + w + offset])
-                        cv2.rectangle(im, (x - 50, y - 50), (x + w + 50, y + h + 50), (225, 0, 0), 2)
-                        cv2.imshow('Creating Photo', im[y - offset:y + h + offset, x - offset:x + w + offset])
-                    except Exception as e:
-                        print(f"Ошибка сохранения фото: {str(e)}")
-
-                    cv2.waitKey(100)
-
-            video.release()
-            cv2.destroyAllWindows()
-            self.update_users()
-            messagebox.showinfo("Успешно", f"Поздравляем, {name}!\nВы успешно зарегистрировались в системе.")
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
-            try:
-                with open("names.txt", "r+", encoding='utf-8') as file:
-                    lines = file.readlines()
-                    lines = [line for line in lines if line.strip() != f"{new_id},{name},{klass}"]
-                    file.seek(0)
-                    file.writelines(lines)
-                    file.truncate()
+                        if count_fps == 1:
+                            cv2.imwrite(f"dataSet/face-{ID}.{str(i)}.jpg",
+                                        gray[y - offset:y + h + offset,
+                                        x - offset:x + w + offset])  # Записываем файл на диск
+                            cv2.rectangle(im, (x - 50, y - 50), (x + w + 50, y + h + 50), (225, 0, 0),
+                                          2)  # Формируем размеры окна для вывода лица
+                            cv2.imshow('Creating Photo', im[y - offset:y + h + offset,
+                                                         x - offset:x + w + offset])  # Показываем очередной кадр, который мы запомнили
+                            i += 1  # Увеличиваем счётчик кадров
+                            print(f"{i}/70")
+                    except:
+                        print(f"{i}/70")
+                    cv2.waitKey(1)  # Делаем паузу
+                if i >= 70:
+                    video.release()  # Освобождаем камеру
+                    cv2.destroyAllWindows()  # Удалаяем все созданные окна
+                    self.UpdateUsers()  # Обновляем таблицу
+                    messagebox.showinfo("Успешно",
+                                        f"Поздравляем, {name}!\nВы успешно зарегистрировались в системе.")
+                    break  # Останавливаем цикл
             except:
-                pass
+                # Удаляем ученика из файла
+                file = open("names.txt", "r", encoding='utf-8')  # Открываем файл с именами для чтения
+                text = file.read()  # Считываем информацию с файла
+                file.close()  # Закрываем файл
+                text = text.replace(f"{ID},{name},{klass}",
+                                    "")  # Удаляем ID и имя человека
+                output = '\n'.join(line for line in text.split('\n') if line)  # Удаляем лишние пробелы
+                file = open("names.txt", "w", encoding='utf-8')  # Открываем файл с именами для записи
+                file.write(output)  # Добавляем новую информацию в файл
+                file.close()  # Закрываем файл
 
-    def add_video(self):
-        name = simpledialog.askstring("Регистрация ученика", "Имя ученика:")
-        if not name:
-            return
+                # Удаляем то количество фотографий, которые успели сделать
+                for i in range(0, i):
+                    try:
+                        os.remove(f"dataSet/face-{ID}.{str(i)}.jpg")
+                    except:
+                        print("Файл уже удалён.")
 
-        klass = simpledialog.askstring("Регистрация ученика", "Класс ученика (число+буква):")
-        if not klass:
-            return
+                messagebox.showerror("Ошибка!",
+                                     f"В видео недостаточно кадров лица.\nПопробуйте перезаписать видео. Видео должно длится от 15 секунд.\nСмотрите в камеру, не закрывайте лицо и вращайте головой.",
+                                     )
 
-        filename = filedialog.askopenfilename(
-            title="Выберите видео",
-            filetypes=(("Видео файлы", "*.mp4;*.mov;*.avi;*.mkv"), ("Все файлы", "*.*"))
-        )
+                video.release()  # Освобождаем камеру
+                cv2.destroyAllWindows()  # Удалаяем все созданные окна
+                break  # Останавливаем цикл
 
-        if not filename:
-            return
-
+    def DeleteUser(self):
+        # Определяем, какого ученика выбрали
+        selected_people = []
+        for selected_item in self.tree.selection():
+            item = self.tree.item(selected_item)
+            selected_people = item["values"]
+        # Проверяем, выбрана ли строка
         try:
-            with open("names.txt", "r+", encoding='utf-8') as file:
-                lines = file.readlines()
-                last_line = lines[-1].strip()
-                if last_line:
-                    last_id = int(last_line.split(",")[0])
-                else:
-                    last_id = 0
-                new_id = last_id + 1
-                file.write(f"\n{new_id},{name},{klass}")
+            ID = int(selected_people[0])
+            # Удаляем ученика после дополнительного вопроса
+            name = simpledialog.askstring("Удаление ученика",
+                                          f'Для удаления ученика напишите его имя: "{selected_people[1]}".')
+            if name == selected_people[1]:
+                # Удаляем ученика из файла
+                file = open("names.txt", "r", encoding='utf-8')  # Открываем файл с именами для чтения
+                text = file.read()  # Считываем информацию с файла
+                file.close()  # Закрываем файл
+                text = text.replace(f"{selected_people[0]},{selected_people[1]},{selected_people[2]}",
+                                    "")  # Удаляем ID и имя человека
+                output = '\n'.join(line for line in text.split('\n') if line)  # Удаляем лишние пробелы
+                file = open("names.txt", "w", encoding='utf-8')  # Открываем файл с именами для записи
+                file.write(output)  # Добавляем новую информацию в файл
+                file.close()  # Закрываем файл
+                self.UpdateUsers()  # Обновляем таблицу
 
-            detector = cv2.CascadeClassifier("haarcascade_frontalface_default.xml")
-            offset = 50
-            video = cv2.VideoCapture(filename)
-            i = 0
+                # Удаляем 70 фотографий ученика из базы
+                for i in range(0, 70):
+                    os.remove(f"dataSet/face-{selected_people[0]}.{str(i)}.jpg")
 
-            while i < 70:
-                ret, im = video.read()
-                if not ret:
-                    break
-
-                try:
-                    gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-                    faces = detector.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100))
-
-                    for (x, y, w, h) in faces:
-                        cv2.imwrite(f"dataSet/face-{new_id}.{i}.jpg",
-                                    gray[y - offset:y + h + offset, x - offset:x + w + offset])
-                        cv2.rectangle(im, (x - 50, y - 50), (x + w + 50, y + h + 50), (225, 0, 0), 2)
-                        cv2.imshow('Creating Photo', im[y - offset:y + h + offset, x - offset:x + w + offset])
-                        i += 1
-                        cv2.waitKey(1)
-
-                except Exception as e:
-                    print(f"Ошибка обработки кадра: {str(e)}")
-
-            video.release()
-            cv2.destroyAllWindows()
-
-            if i >= 70:
-                self.update_users()
-                messagebox.showinfo("Успешно", f"Поздравляем, {name}!\nВы успешно зарегистрировались в системе.")
-            else:
-                self.cleanup_failed_registration(new_id, name, klass, i)
-                messagebox.showerror("Ошибка",
-                                     "В видео недостаточно кадров лица.\n"
-                                     "Попробуйте перезаписать видео. Видео должно длиться от 15 секунд.\n"
-                                     "Смотрите в камеру, не закрывайте лицо и вращайте головой.")
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
-
-    def cleanup_failed_registration(self, user_id, name, klass, photos_taken):
-        try:
-            with open("names.txt", "r+", encoding='utf-8') as file:
-                lines = file.readlines()
-                lines = [line for line in lines if line.strip() != f"{user_id},{name},{klass}"]
-                file.seek(0)
-                file.writelines(lines)
-                file.truncate()
-
-            for i in range(photos_taken):
-                try:
-                    os.remove(f"dataSet/face-{user_id}.{i}.jpg")
-                except:
-                    pass
-
-        except Exception as e:
-            print(f"Ошибка очистки: {str(e)}")
-
-    def delete_user(self):
-        selected_item = self.tree.selection()
-        if not selected_item:
-            messagebox.showwarning("Ошибка", "Выберите ученика в таблице.")
-            return
-
-        item = self.tree.item(selected_item[0])
-        selected_people = item["values"]
-
-        confirm = simpledialog.askstring(
-            "Подтверждение удаления",
-            f'Для удаления ученика введите его имя: "{selected_people[1]}"')
-
-        if confirm != selected_people[1]:
-            messagebox.showinfo("Отмена", "Удаление отменено.")
-            return
-
-        try:
-            with open("names.txt", "r+", encoding='utf-8') as file:
-                lines = file.readlines()
-                lines = [line for line in lines if
-                         line.strip() != f"{selected_people[0]},{selected_people[1]},{selected_people[2]}"]
-                file.seek(0)
-                file.writelines(lines)
-                file.truncate()
-
-            for i in range(70):
-                try:
-                    os.remove(f"dataSet/face-{selected_people[0]}.{i}.jpg")
-                except:
-                    pass
-
-            self.update_users()
-            messagebox.showinfo("Успешно", f"Ученик \"{selected_people[1]}\" удалён из базы.")
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка при удалении: {str(e)}")
+                messagebox.showinfo("Успешно",
+                                    f"Ученик \"{selected_people[1]}\" удалён из базы.")  # Выводим результат
+        except:
+            messagebox.showerror("Ошибка!",
+                                 "Выберите ученика в таблице.")
 
     # endregion
 
     # region Работа с историей
-    def show_history(self):
+    def ShowHistory(self):
         history_window = tk.Toplevel(self)
         history_window.title("История прохождений")
         history_window.geometry("800x600")
@@ -391,90 +396,76 @@ class App(tk.Tk):
         button_frame = ttk.Frame(history_window)
         button_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        save_btn = ModernButton(button_frame, text="Сохранить изменения", command=self.save_history)
+        save_btn = ModernButton(button_frame, text="Сохранить изменения", command=self.SaveHistory)
         save_btn.pack(side=tk.RIGHT)
 
-        clear_btn = ModernButton(button_frame, text="Очистить историю", command=self.clear_history)
-        clear_btn.pack(side=tk.RIGHT, padx=5)
-
-    def save_history(self):
-        try:
-            with open("history.txt", "w", encoding='utf-8') as file:
-                file.write(self.history_text.get("1.0", tk.END))
-            messagebox.showinfo("Успешно", "История обновлена.")
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка при сохранении: {str(e)}")
-
-    def clear_history(self):
-        if messagebox.askyesno("Подтверждение", "Вы уверены, что хотите очистить всю историю?"):
-            self.history_text.delete("1.0", tk.END)
+    def SaveHistory(self):
+        file = open("history.txt", "w", encoding='utf-8')  # Открываем файл с историей для записи
+        file.write(self.history_text.get("1.0", tk.END))  # Добавляем новую информацию в файл
+        file.close()  # Закрываем файл
+        messagebox.showinfo("Успешно", "История обновлена.")
 
     # endregion
 
-    # region Распознавание лиц
-    def start_recognition(self):
-        try:
-            self.recognizer.read("trainer.yml")
-            video = cv2.VideoCapture(0)
-            font = cv2.FONT_HERSHEY_SIMPLEX
+    # region Запуск системы
+    def StartRecognition(self):
+        path = os.path.dirname(os.path.abspath(__file__))  # Получаем путь к скрипту
+        self.recognizer.read("trainer.yml")  # Добавляем в него модель, которую мы обучили
 
-            while True:
-                ret, im = video.read()
-                if not ret:
-                    continue
+        video = cv2.VideoCapture(0)  # Получаем доступ к камере
 
-                gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
-                faces = self.faceCascade.detectMultiScale(
-                    gray,
-                    scaleFactor=1.2,
-                    minNeighbors=5,
-                    minSize=(100, 100),
-                    flags=cv2.CASCADE_SCALE_IMAGE
-                )
-
-                for (x, y, w, h) in faces:
-                    nbr_predicted, coord = self.recognizer.predict(gray[y:y + h, x:x + w])
-                    student = None
-
-                    for item in self.tree.get_children():
-                        user = self.tree.item(item)["values"]
-                        if int(nbr_predicted) == int(user[0]) and int(coord) < 70:
-                            student = [user[1], user[2]]
-                            break
-
-                    current_time = datetime.datetime.now()
-                    date = current_time.strftime("%d.%m.%Y %H:%M:%S")
-
-                    if student:
-                        color = (0, 255, 0)
-                        log_entry = f"Ученик {student[1]} класса {student[0]} прошёл через проходную в {date}."
-                    else:
-                        color = (0, 0, 255)
-                        log_entry = f"Неизвестный человек пытался пройти через проходную в {date}."
-
-                    cv2.rectangle(im, (x, y), (x + w, y + h), color, 2)
-
-                    try:
-                        with open("history.txt", "a", encoding='utf-8') as file:
-                            file.write(f"\n{log_entry}")
-                    except:
-                        pass
-
-                    cv2.imshow('Face Recognizer ("Esc" to exit)', im)
-
-                    key = cv2.waitKey(3000)
-                    if key == 27:
-                        video.release()
-                        cv2.destroyAllWindows()
-                        return
-
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Произошла ошибка при распознавании: {str(e)}")
-            try:
-                video.release()
-                cv2.destroyAllWindows()
-            except:
-                pass
+        loop = True
+        # Запускаем цикл
+        while loop == True:
+            ret, im = video.read()  # Получаем видеопоток
+            gray = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)  # Переводим его в ч/б
+            faces = self.faceCascade.detectMultiScale(gray, scaleFactor=1.2, minNeighbors=5, minSize=(100, 100),
+                                                      flags=cv2.CASCADE_SCALE_IMAGE)  # Определяем лица на видео
+            # Перебираем все найденные лица
+            for (x, y, w, h) in faces:
+                nbr_predicted, coord = self.recognizer.predict(gray[y:y + h, x:x + w])  # Получаем ID ученика
+                student = []  # Переменная для студента
+                for item in self.tree.get_children():
+                    user = self.tree.item(item)["values"]
+                    if int(nbr_predicted) == int(user[0]) and int(coord) < 70:
+                        student = [user[1], user[2]]
+                # Получаем текущее время
+                current_time = datetime.datetime.now()
+                date = f"{current_time.day}.{current_time.month}.{current_time.year} {current_time.hour}:{current_time.minute}:{current_time.second}"
+                # Если мы знаем имя ученика, то
+                try:
+                    name = student[0]
+                    cv2.rectangle(im, (x, y), (x + w, y + h), (0, 255, 0),
+                                  2)  # Рисуем прямоугольник вокруг лица зелёного цвета
+                    file = open("history.txt", "r+", encoding='utf-8')  # Открываем файл с записями проходов для чтения
+                    # Считываем информацию
+                    now = file.read()
+                    file.close()  # Закрываем файл
+                    new = f"Ученик {student[1]} класса {student[0]} прошёл через проходную в {date}."
+                    text = f"{now}\n{new}"
+                    file = open("history.txt", "w", encoding='utf-8')  # Открываем файл с записями проходов для записи
+                    # Добавляем новую информацию в файл
+                    file.write(text)
+                    file.close()  # Закрываем файл
+                except:
+                    cv2.rectangle(im, (x, y), (x + w, y + h), (0, 0, 255),
+                                  2)  # Рисуем прямоугольник вокруг лица красного цвета
+                    file = open("history.txt", "r+", encoding='utf-8')  # Открываем файл с записями проходов для чтения
+                    # Считываем информацию
+                    now = file.read()
+                    file.close()  # Закрываем файл
+                    new = f"Неизвестный человек пытался пройти через проходную в {date}."
+                    text = f"{now}\n{new}"
+                    file = open("history.txt", "w", encoding='utf-8')  # Открываем файл с записями проходов для записи
+                    # Добавляем новую информацию в файл
+                    file.write(text)
+                    file.close()  # Закрываем файл
+                cv2.imshow('Face Recognizer ("Esc" to exit)', im)  # Выводим окно с изображением с камеры
+                k = cv2.waitKey(3000)  # Делаем паузу в 3 секунды
+                if k == 27:
+                    loop = False
+                    cv2.destroyAllWindows()
+                    break
 
 
 # endregion
