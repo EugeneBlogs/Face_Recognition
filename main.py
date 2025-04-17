@@ -189,8 +189,11 @@ class App(tk.Tk):
         try:
             with open("names.txt", "r+", encoding='utf-8') as file:
                 lines = file.readlines()
-                last_line = lines[-1].strip() if lines else "0,-,-"
-                last_id = int(last_line.split(",")[0])
+                last_line = lines[-1].strip()
+                if last_line:
+                    last_id = int(last_line.split(",")[0])
+                else:
+                    last_id = 0
                 new_id = last_id + 1
                 file.write(f"\n{new_id},{name},{klass}")
 
@@ -254,8 +257,11 @@ class App(tk.Tk):
         try:
             with open("names.txt", "r+", encoding='utf-8') as file:
                 lines = file.readlines()
-                last_line = lines[-1].strip() if lines else "0,-,-"
-                last_id = int(last_line.split(",")[0])
+                last_line = lines[-1].strip()
+                if last_line:
+                    last_id = int(last_line.split(",")[0])
+                else:
+                    last_id = 0
                 new_id = last_id + 1
                 file.write(f"\n{new_id},{name},{klass}")
 
